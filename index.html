@@ -100,7 +100,80 @@
     font-size: 22px;
     letter-spacing: .2px;
   }
-  .topbar-actions{ display:flex; gap: 8px; }
+  .topbar-actions{ display:flex; align-items: center; gap: 8px; }
+  .save-status{
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding-right: 2px;
+    white-space: nowrap;
+  }
+  .save-status::before{
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex: 0 0 auto;
+  }
+  .save-status.is-saving::before{ background: var(--gold); animation: pulse-dot 1s ease-in-out infinite; }
+  .save-status.is-saved::before{ background: var(--success); }
+  .save-status.is-offline{ color: var(--danger); }
+  .save-status.is-offline::before{ background: var(--danger); }
+  @keyframes pulse-dot{
+    0%, 100%{ opacity: 1; }
+    50%{ opacity: .35; }
+  }
+
+  .conn-banner{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+    color: var(--text);
+    border-radius: 14px;
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .conn-banner button{
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-weight: 800;
+    font-size: 12.5px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .conn-banner button:hover{ background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+  .loading-overlay{
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 100;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .loading-spinner{
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
   .icon-btn{
     width: 38px; height: 38px;
     border-radius: 999px;
@@ -529,6 +602,33 @@
     flex: 0 0 auto;
   }
   .remove-btn:hover{ background: var(--border); color: var(--danger); }
+  .roster-list li.absent{ opacity: .55; }
+  .roster-row-tags{ display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+  .absent-tag{
+    font-size: 10.5px;
+    color: var(--danger);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+  }
+  .absent-toggle-btn{
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 4px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .absent-toggle-btn:hover{ background: var(--surface-2); }
+  .absent-toggle-btn.is-absent{
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
 
   .modal-footer{
     display: flex;
@@ -558,19 +658,32 @@
   @media (prefers-reduced-motion: reduce){
     #wheelCanvas{ transition: none !important; }
     .winner-card{ animation: none; }
+    .loading-spinner{ animation: none; }
+    .save-status.is-saving::before{ animation: none; }
   }
 </style>
 </head>
 <body>
 
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner" aria-hidden="true"></div>
+  <p>Loading your classes…</p>
+</div>
+
 <div class="app" id="app">
   <header class="topbar">
     <div class="brand"><span class="brand-icon">🎰</span><span class="brand-name">Class Roulette</span></div>
     <div class="topbar-actions">
+      <span class="save-status" id="saveStatus" aria-live="polite"></span>
       <button id="soundToggle" class="icon-btn" aria-pressed="true" title="Mute sound">🔊</button>
       <button id="helpBtn" class="icon-btn" title="How it works" aria-label="How it works">?</button>
     </div>
   </header>
+
+  <div class="conn-banner" id="connBanner" hidden>
+    <span id="connBannerText">Can't reach the server — showing your last saved copy.</span>
+    <button id="retryConnBtn" type="button">Retry now</button>
+  </div>
 
   <nav class="class-tabs" id="classTabs" role="tablist" aria-label="Classes"></nav>
 
@@ -664,8 +777,9 @@
         <li><strong>Spin</strong> the wheel (or press Space) to call on a random student.</li>
         <li>Once picked, a student sits out until everyone in the class has had a turn — then the round resets automatically.</li>
         <li><strong>Edit roster</strong> to add, remove or paste in a full class list.</li>
+        <li>Mark a student <strong>absent</strong> from the roster editor to skip them today without removing them for good.</li>
         <li><strong>Undo last pick</strong> fixes a misclick or a student who stepped out.</li>
-        <li>Everything is saved in this browser, so it's ready to go next class period.</li>
+        <li>Everything is saved to a small database on this device, so it's ready to go next class period — even after a refresh.</li>
       </ul>
     </div>
   </div>
@@ -702,7 +816,7 @@
     var classes = [];
     for (var i = 0; i < CLASS_COUNT; i++){
       var roster = EXAMPLE_ROSTERS[i].map(function(name){
-        return { id: uid("s"), name: name };
+        return { id: uid("s"), name: name, absent: false };
       });
       classes.push({
         id: uid("c"),
@@ -716,23 +830,57 @@
     return { classes: classes, activeIndex: 0, muted: false, bannerDismissed: false, isExampleData: true };
   }
 
-  function loadState(){
+  function readLocalCache(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return makeDefaultState();
+      if (!raw) return null;
       var parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.classes) || parsed.classes.length !== CLASS_COUNT) return makeDefaultState();
+      if (!parsed || !Array.isArray(parsed.classes) || parsed.classes.length !== CLASS_COUNT) return null;
       return parsed;
     }catch(e){
-      return makeDefaultState();
+      return null;
     }
   }
 
-  function saveState(){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){ /* storage unavailable — continue without persistence */ }
+  function cacheStateLocally(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){ /* storage unavailable — server copy still holds */ }
   }
 
-  var state = loadState();
+  var state = null;
+  var saveDebounceTimer = null;
+
+  function setSaveStatus(mode){
+    if (!saveStatusEl) return;
+    saveStatusEl.className = "save-status is-" + mode;
+    saveStatusEl.textContent = mode === "saving" ? "Saving…" : mode === "offline" ? "Offline" : "Saved";
+  }
+
+  function setConnBanner(show, message){
+    connBanner.hidden = !show;
+    if (show && message) connBannerText.textContent = message;
+  }
+
+  function flushSave(){
+    fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state)
+    }).then(function(res){
+      if (!res.ok) throw new Error("save failed");
+      setConnBanner(false);
+      setSaveStatus("saved");
+    }).catch(function(){
+      setSaveStatus("offline");
+      setConnBanner(true, "Can't reach the server — your changes are kept in this browser and will sync once it's back.");
+    });
+  }
+
+  function saveState(){
+    cacheStateLocally();
+    setSaveStatus("saving");
+    clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = setTimeout(flushSave, 400);
+  }
 
   // ---------- DOM refs ----------
   var $ = function(id){ return document.getElementById(id); };
@@ -771,6 +919,11 @@
   var clearRosterBtn = $("clearRosterBtn");
   var exampleBanner = $("exampleBanner");
   var dismissBanner = $("dismissBanner");
+  var saveStatusEl = $("saveStatus");
+  var loadingOverlay = $("loadingOverlay");
+  var connBanner = $("connBanner");
+  var connBannerText = $("connBannerText");
+  var retryConnBtn = $("retryConnBtn");
   var confettiCanvas = $("confettiCanvas");
   var confettiCtx = confettiCanvas.getContext("2d");
 
@@ -790,7 +943,11 @@
 
   function remainingStudents(cls){
     var map = rosterMap(cls);
-    return cls.remaining.map(function(id){ return map[id]; }).filter(Boolean);
+    return cls.remaining.map(function(id){ return map[id]; }).filter(function(s){ return s && !s.absent; });
+  }
+
+  function activeRosterCount(cls){
+    return cls.roster.filter(function(s){ return !s.absent; }).length;
   }
 
   // ---------- audio ----------
@@ -923,7 +1080,7 @@
     return t + "…";
   }
 
-  function drawWheel(students){
+  function drawWheel(students, emptyLines){
     var w = canvas.width, h = canvas.height;
     var cx = w/2, cy = h/2;
     var outerR = w/2 - 10;
@@ -932,6 +1089,7 @@
 
     var n = students.length;
     if (n === 0){
+      var lines = emptyLines || ["Add students", "to start spinning"];
       ctx.beginPath();
       ctx.arc(cx, cy, outerR, 0, Math.PI*2);
       ctx.fillStyle = "#2a2346";
@@ -940,9 +1098,9 @@
       ctx.font = "700 20px Manrope, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("Add students", cx, cy - 12);
+      ctx.fillText(lines[0], cx, cy - 12);
       ctx.font = "600 15px Manrope, sans-serif";
-      ctx.fillText("to start spinning", cx, cy + 14);
+      ctx.fillText(lines[1], cx, cy + 14);
       return;
     }
 
@@ -993,7 +1151,16 @@
 
   function redrawWheel(){
     var cls = activeClass();
-    drawWheel(remainingStudents(cls));
+    var students = remainingStudents(cls);
+    var lines = null;
+    if (cls.roster.length === 0){
+      lines = ["Add students", "to start spinning"];
+    } else if (activeRosterCount(cls) === 0){
+      lines = ["Everyone is absent", "mark someone present"];
+    } else if (students.length === 0){
+      lines = ["Round complete", "reset to spin again"];
+    }
+    drawWheel(students, lines);
   }
 
   // ---------- rendering ----------
@@ -1009,7 +1176,7 @@
       nameSpan.textContent = cls.name;
       var countSpan = document.createElement("span");
       countSpan.className = "count";
-      countSpan.textContent = cls.remaining.length + "/" + cls.roster.length;
+      countSpan.textContent = remainingStudents(cls).length + "/" + activeRosterCount(cls);
       btn.appendChild(nameSpan);
       btn.appendChild(countSpan);
       btn.addEventListener("click", function(){
@@ -1029,12 +1196,13 @@
 
   function renderRoundProgress(){
     var cls = activeClass();
-    var total = cls.roster.length;
-    var picked = total - cls.remaining.length;
+    var total = activeRosterCount(cls);
+    var remaining = remainingStudents(cls).length;
+    var picked = total - remaining;
     var pct = total === 0 ? 0 : Math.round((picked/total) * 100);
     roundBarEl.style.width = pct + "%";
     roundLabelEl.textContent = total === 0
-      ? "Add students to get started"
+      ? (cls.roster.length === 0 ? "Add students to get started" : "Everyone is marked absent")
       : picked + " of " + total + " picked this round";
   }
 
@@ -1073,7 +1241,7 @@
 
   function renderSpinButton(){
     var cls = activeClass();
-    spinBtn.disabled = spinning || cls.remaining.length === 0;
+    spinBtn.disabled = spinning || remainingStudents(cls).length === 0;
   }
 
   function renderBanner(){
@@ -1094,7 +1262,7 @@
   function easeOutQuint(t){ return 1 - Math.pow(1 - t, 5); }
 
   function spin(){
-    if (spinning) return;
+    if (spinning || !state) return;
     var cls = activeClass();
     if (cls.remaining.length === 0) return;
     spinning = true;
@@ -1153,7 +1321,7 @@
     var entry = { name: winner.name, time: Date.now() };
     cls.history.unshift(entry);
     cls.lastPick = { studentId: winner.id };
-    var roundComplete = cls.remaining.length === 0;
+    var roundComplete = remainingStudents(cls).length === 0;
     pendingRoundReset = roundComplete;
 
     saveState();
@@ -1231,8 +1399,12 @@
     rosterCountEl.textContent = cls.roster.length + (cls.roster.length === 1 ? " student" : " students");
     cls.roster.forEach(function(s, i){
       var isPicked = cls.remaining.indexOf(s.id) === -1;
+      var isAbsent = !!s.absent;
       var li = document.createElement("li");
-      if (isPicked) li.className = "picked";
+      var liClasses = [];
+      if (isPicked) liClasses.push("picked");
+      if (isAbsent) liClasses.push("absent");
+      if (liClasses.length) li.className = liClasses.join(" ");
       var dot = document.createElement("span");
       dot.className = "roster-dot";
       dot.style.background = SEGMENT_COLORS[i % SEGMENT_COLORS.length];
@@ -1240,12 +1412,29 @@
       nm.className = "rname";
       nm.textContent = s.name;
       li.appendChild(dot); li.appendChild(nm);
-      if (isPicked){
+      var tags = document.createElement("span");
+      tags.className = "roster-row-tags";
+      if (isAbsent){
+        var absentTag = document.createElement("span");
+        absentTag.className = "absent-tag";
+        absentTag.textContent = "absent";
+        tags.appendChild(absentTag);
+      } else if (isPicked){
         var tag = document.createElement("span");
         tag.className = "picked-tag";
         tag.textContent = "picked";
-        li.appendChild(tag);
+        tags.appendChild(tag);
       }
+      li.appendChild(tags);
+      var absentBtn = document.createElement("button");
+      absentBtn.type = "button";
+      absentBtn.className = "absent-toggle-btn" + (isAbsent ? " is-absent" : "");
+      absentBtn.textContent = isAbsent ? "Mark present" : "Mark absent";
+      absentBtn.setAttribute("aria-pressed", isAbsent ? "true" : "false");
+      absentBtn.addEventListener("click", function(){
+        toggleAbsent(s.id);
+      });
+      li.appendChild(absentBtn);
       var rm = document.createElement("button");
       rm.className = "remove-btn";
       rm.type = "button";
@@ -1263,7 +1452,7 @@
     name = name.trim();
     if (!name) return;
     var cls = activeClass();
-    var s = { id: uid("s"), name: name };
+    var s = { id: uid("s"), name: name, absent: false };
     cls.roster.push(s);
     cls.remaining.push(s.id);
     state.isExampleData = false;
@@ -1271,6 +1460,19 @@
     renderRosterList();
     renderTabs();
     renderRoundProgress();
+  }
+
+  function toggleAbsent(id){
+    var cls = activeClass();
+    var s = rosterMap(cls)[id];
+    if (!s) return;
+    s.absent = !s.absent;
+    saveState();
+    renderRosterList();
+    renderTabs();
+    renderRoundProgress();
+    renderSpinButton();
+    redrawWheel();
   }
 
   function removeStudent(id){
@@ -1314,6 +1516,7 @@
 
   document.addEventListener("keydown", function(e){
     if (e.code !== "Space") return;
+    if (!state) return;
     var tag = (document.activeElement && document.activeElement.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA") return;
     if (!winnerOverlay.hidden || !rosterModal.hidden || !helpModal.hidden) return;
@@ -1378,19 +1581,47 @@
     else if (!helpModal.hidden) helpModal.hidden = true;
   });
 
-  window.addEventListener("resize", function(){ redrawWheel(); resizeConfettiCanvas(); });
+  window.addEventListener("resize", function(){ if (state) redrawWheel(); resizeConfettiCanvas(); });
 
-  // ---------- init ----------
-  soundToggle.textContent = state.muted ? "🔇" : "🔊";
-  soundToggle.setAttribute("aria-pressed", state.muted ? "false" : "true");
-  canvas.style.transform = "rotate(0deg)";
-  resizeConfettiCanvas();
-  renderAll(true);
+  retryConnBtn.addEventListener("click", function(){
+    setConnBanner(false);
+    flushSave();
+  });
 
-  // Re-draw once the custom webfont has actually loaded, so labels don't stay stuck in a fallback font.
-  if (document.fonts && document.fonts.ready){
-    document.fonts.ready.then(function(){ redrawWheel(); }).catch(function(){});
+  // ---------- boot ----------
+  function startApp(){
+    soundToggle.textContent = state.muted ? "🔇" : "🔊";
+    soundToggle.setAttribute("aria-pressed", state.muted ? "false" : "true");
+    canvas.style.transform = "rotate(0deg)";
+    resizeConfettiCanvas();
+    renderAll(true);
+    loadingOverlay.hidden = true;
+
+    // Re-draw once the custom webfont has actually loaded, so labels don't stay stuck in a fallback font.
+    if (document.fonts && document.fonts.ready){
+      document.fonts.ready.then(function(){ redrawWheel(); }).catch(function(){});
+    }
   }
+
+  function boot(){
+    fetch("/api/state").then(function(res){
+      if (!res.ok) throw new Error("load failed");
+      return res.json();
+    }).then(function(data){
+      if (!data || !Array.isArray(data.classes) || data.classes.length !== CLASS_COUNT) throw new Error("bad state");
+      state = data;
+      startApp();
+    }).catch(function(){
+      var cached = readLocalCache();
+      state = cached || makeDefaultState();
+      setConnBanner(true, cached
+        ? "Can't reach the server — showing your last saved copy from this browser."
+        : "Can't reach the server — starting with example classes.");
+      startApp();
+    });
+  }
+
+  boot();
 })();
 </script>
 </body>

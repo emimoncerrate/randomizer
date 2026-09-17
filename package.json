@@ -1,0 +1,12 @@
+{
+  "name": "class-roulette",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Classroom randomizer wheel with SQLite-backed persistence.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
